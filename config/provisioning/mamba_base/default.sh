@@ -8,9 +8,14 @@
 
 DISK_GB_REQUIRED=30
 
+MAMBA_PACKAGES=(
+    #"package1"
+    #"package2=version"
+  )
+  
 PIP_PACKAGES=(
-
-)
+    "bitsandbytes==0.41.2.post2"
+  )
 
 EXTENSIONS=(
     "https://github.com/Mikubill/sd-webui-controlnet"
@@ -21,6 +26,7 @@ EXTENSIONS=(
     "https://github.com/AlUlkesh/stable-diffusion-webui-images-browser"
     "https://github.com/hako-mikan/sd-webui-regional-prompter"
     "https://github.com/Coyote-A/ultimate-upscale-for-automatic1111"
+    "https://github.com/fkunn1326/openpose-editor"
     "https://github.com/Gourieff/sd-webui-reactor"
 )
 
@@ -71,12 +77,11 @@ CONTROLNET_MODELS=(
 
 function provisioning_start() {
     source /opt/ai-dock/etc/environment.sh
-    source /opt/ai-dock/bin/venv-set.sh webui
-
     DISK_GB_AVAILABLE=$(($(df --output=avail -m "${WORKSPACE}" | tail -n1) / 1000))
     DISK_GB_USED=$(($(df --output=used -m "${WORKSPACE}" | tail -n1) / 1000))
     DISK_GB_ALLOCATED=$(($DISK_GB_AVAILABLE + $DISK_GB_USED))
     provisioning_print_header
+    provisioning_get_mamba_packages
     provisioning_get_pip_packages
     provisioning_get_extensions
     provisioning_get_models \
@@ -104,16 +109,20 @@ function provisioning_start() {
     
     # Start and exit because webui will probably require a restart
     cd /opt/stable-diffusion-webui && \
-    source "$WEBUI_VENV/bin/activate"
-    LD_PRELOAD=libtcmalloc.so python launch.py \
+    micromamba run -n webui -e LD_PRELOAD=libtcmalloc.so python launch.py \
         ${FLAGS_COMBINED}
-    deactivate
     provisioning_print_end
+}
+
+function provisioning_get_mamba_packages() {
+    if [[ -n $MAMBA_PACKAGES ]]; then
+        $MAMBA_INSTALL -n webui ${MAMBA_PACKAGES[@]}
+    fi
 }
 
 function provisioning_get_pip_packages() {
     if [[ -n $PIP_PACKAGES ]]; then
-        "$WEBUI_VENV_PIP" install --no-cache-dir ${PIP_PACKAGES[@]}
+        micromamba run -n webui $PIP_INSTALL ${PIP_PACKAGES[@]}
     fi
 }
 
@@ -123,20 +132,18 @@ function provisioning_get_extensions() {
         path="/opt/stable-diffusion-webui/extensions/${dir}"
         requirements="${path}/requirements.txt"
         if [[ -d $path ]]; then
-            # Pull only if AUTO_UPDATE
             if [[ ${AUTO_UPDATE,,} == "true" ]]; then
                 printf "Updating extension: %s...\n" "${repo}"
                 ( cd "$path" && git pull )
-            fi
-            # Always pip install
-            if [[ -e $requirements ]]; then
-                "$WEBUI_VENV_PIP" install --no-cache-dir -r "$requirements"
+                if [[ -e $requirements ]]; then
+                    micromamba -n webui run ${PIP_INSTALL} -r "$requirements"
+                fi
             fi
         else
             printf "Downloading extension: %s...\n" "${repo}"
             git clone "${repo}" "${path}" --recursive
             if [[ -e $requirements ]]; then
-                "$WEBUI_VENV_PIP" install --no-cache-dir -r "${requirements}"
+                micromamba -n webui run ${PIP_INSTALL} -r "${requirements}"
             fi
         fi
     done
